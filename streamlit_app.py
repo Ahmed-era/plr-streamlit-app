@@ -393,34 +393,62 @@ def predict_plr_enhanced(left_data, right_data, model, scaler):
             left_pupil = left_pupil[:40]
             right_pupil = right_pupil[:40]
         
-        # Stack into sequence (40, 2)
-        sequence = np.column_stack([left_pupil, right_pupil])
+        # Try different input formats based on model architecture
         
-        # Normalize if scaler is provided
-        if scaler is not None:
+        # Option 1: Stack as (1, 40, 2) - channels last
+        sequence_v1 = np.column_stack([left_pupil, right_pupil])
+        sequence_v1 = np.expand_dims(sequence_v1, axis=0)  # Shape: (1, 40, 2)
+        
+        # Option 2: Separate channels (1, 80, 1) - concatenated
+        sequence_v2 = np.concatenate([left_pupil, right_pupil])
+        sequence_v2 = np.expand_dims(sequence_v2, axis=0)
+        sequence_v2 = np.expand_dims(sequence_v2, axis=-1)  # Shape: (1, 80, 1)
+        
+        # Option 3: Left only (1, 40, 1)
+        sequence_v3 = np.expand_dims(left_pupil, axis=0)
+        sequence_v3 = np.expand_dims(sequence_v3, axis=-1)  # Shape: (1, 40, 1)
+        
+        # Option 4: Average of both pupils (1, 40, 1)
+        avg_pupil = (left_pupil + right_pupil) / 2
+        sequence_v4 = np.expand_dims(avg_pupil, axis=0)
+        sequence_v4 = np.expand_dims(sequence_v4, axis=-1)  # Shape: (1, 40, 1)
+        
+        # Try each format until one works
+        predictions = None
+        prediction_std = None
+        
+        for i, sequence in enumerate([sequence_v4, sequence_v3, sequence_v2, sequence_v1], 1):
             try:
-                sequence = scaler.transform(sequence)
-            except:
-                pass  # If scaler fails, use raw data
-        
-        # Reshape to (1, 40, 2) - add batch dimension
-        sequence = np.expand_dims(sequence, axis=0)
-        
-        # Verify shape
-        if sequence.shape != (1, 40, 2):
-            st.error(f"Shape mismatch: {sequence.shape}, expected (1, 40, 2)")
-            return None, None
-        
-        # Multiple predictions for uncertainty estimation
-        predictions_list = []
-        for _ in range(5):
-            pred = model.predict(sequence, verbose=0)
-            predictions_list.append(pred[0])
-        
-        predictions = np.mean(predictions_list, axis=0)
-        prediction_std = np.std(predictions_list, axis=0)
+                # Normalize if scaler is provided
+                if scaler is not None and len(sequence.shape) == 3 and sequence.shape[-1] == 2:
+                    try:
+                        original_shape = sequence.shape
+                        sequence_2d = sequence.reshape(-1, 2)
+                        sequence_2d = scaler.transform(sequence_2d)
+                        sequence = sequence_2d.reshape(original_shape)
+                    except:
+                        pass
+                
+                # Try prediction
+                predictions_list = []
+                for _ in range(5):
+                    pred = model.predict(sequence, verbose=0)
+                    predictions_list.append(pred[0])
+                
+                predictions = np.mean(predictions_list, axis=0)
+                prediction_std = np.std(predictions_list, axis=0)
+                
+                # If we got here, it worked!
+                st.info(f"✅ Using input format {i}: shape {sequence.shape}")
+                break
+                
+            except Exception as e:
+                if i == 4:  # Last attempt
+                    st.error(f"All input formats failed. Last error: {str(e)}")
+                continue
         
         return predictions, prediction_std
+        
     except Exception as e:
         st.error(f"⚠️ Prediction error: {str(e)}")
         import traceback
