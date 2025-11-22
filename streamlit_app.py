@@ -509,7 +509,7 @@ def main():
                 height=300,
                 showlegend=False,
                 xaxis=dict(range=[0, 110])
-            ))
+            )
             st.plotly_chart(fig, use_container_width=True)
             
             # Detailed metrics
@@ -581,3 +581,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
