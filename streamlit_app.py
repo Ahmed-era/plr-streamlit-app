@@ -178,19 +178,3 @@ else:
     })
     st.dataframe(sample_df, use_container_width=True)
     st.caption("Your CSV should have 40 rows in this format")
-```
-
-### Step 5: Create `requirements.txt`
-```
-streamlit==1.39.0
-tensorflow==2.15.0
-numpy==1.24.3
-pandas==2.0.3
-scikit-learn==1.3.0
-joblib==1.3.2
-plotly==5.18.0
-```
-
-### Step 6: Create `packages.txt`
-```
-libhdf5-dev
