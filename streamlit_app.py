@@ -15,7 +15,10 @@ st.set_page_config(
 # Load model and scaler
 @st.cache_resource
 def load_model():
-    model = tf.keras.models.load_model('plr_model_glaucoma.h5')
+    model = tf.keras.models.load_model(
+        'plr_model_glaucoma.h5',
+        compile=False
+    )
     scaler = joblib.load('plr_scaler_glaucoma.pkl')
     return model, scaler
 
@@ -178,3 +181,4 @@ else:
     })
     st.dataframe(sample_df, use_container_width=True)
     st.caption("Your CSV should have 40 rows in this format")
+
