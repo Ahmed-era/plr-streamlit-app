@@ -13,13 +13,28 @@ st.set_page_config(
 )
 
 # Load model and scaler
+# Load model and scaler
 @st.cache_resource
 def load_model():
-    model = tf.keras.models.load_model(
-        'plr_model_glaucoma.h5',
-        compile=False
-    )
-    scaler = joblib.load('plr_scaler_glaucoma.pkl')
+    try:
+        # Try loading with compile=False
+        model = tf.keras.models.load_model('plr_model_glaucoma.h5', compile=False)
+        # Recompile the model
+        model.compile(
+            optimizer='adam',
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
+    except Exception as e:
+        st.error(f"Error loading model: {str(e)}")
+        st.stop()
+    
+    try:
+        scaler = joblib.load('plr_scaler_glaucoma.pkl')
+    except Exception as e:
+        st.error(f"Error loading scaler: {str(e)}")
+        st.stop()
+    
     return model, scaler
 
 model, scaler = load_model()
@@ -181,4 +196,5 @@ else:
     })
     st.dataframe(sample_df, use_container_width=True)
     st.caption("Your CSV should have 40 rows in this format")
+
 
