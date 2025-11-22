@@ -8,7 +8,6 @@ import cv2
 from PIL import Image
 import tempfile
 import os
-import time
 
 # Page config
 st.set_page_config(
@@ -103,26 +102,37 @@ def process_video(video_file):
     right_measurements = []
     frames_processed = 0
     
+    # Get total frames
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
     # Progress bar
     progress_bar = st.progress(0)
     status_text = st.empty()
+    
+    # Calculate frame skip to get ~40 frames evenly distributed
+    frame_skip = max(1, total_frames // 40)
+    frame_count = 0
     
     while frames_processed < 40 and cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
         
-        # Detect pupils
-        _, left_diam, right_diam = detect_pupils(frame)
-        
-        if left_diam and right_diam:
-            left_measurements.append(left_diam)
-            right_measurements.append(right_diam)
-            frames_processed += 1
+        # Process every nth frame
+        if frame_count % frame_skip == 0:
+            # Detect pupils
+            _, left_diam, right_diam = detect_pupils(frame)
             
-            # Update progress
-            progress_bar.progress(frames_processed / 40)
-            status_text.text(f"Processing: {frames_processed}/40 frames")
+            if left_diam and right_diam:
+                left_measurements.append(left_diam)
+                right_measurements.append(right_diam)
+                frames_processed += 1
+                
+                # Update progress
+                progress_bar.progress(min(frames_processed / 40, 1.0))
+                status_text.text(f"Processing: {frames_processed}/40 frames")
+        
+        frame_count += 1
     
     cap.release()
     os.unlink(tfile.name)
@@ -179,19 +189,20 @@ def main():
     with st.sidebar:
         st.header("ℹ️ Instructions")
         st.markdown("""
-        ### 📹 Recording Options:
+        ### 📹 How to Use:
         
-        **Option 1: Direct Recording**
-        - Use built-in camera
-        - Take 40 snapshots
-        - Shine light during recording
+        **🎥 Recommended: Upload Video**
+        1. Record 4-5 sec video on phone
+        2. Show both eyes clearly
+        3. Shine light during recording
+        4. Upload and analyze
         
-        **Option 2: Upload Video**
-        - Record 4-5 seconds on phone
-        - Upload video file
-        - Auto-extracts frames
+        **📸 Alternative: Take Snapshots**
+        1. Take multiple photos (40)
+        2. Upload photos one by one
+        3. System collects measurements
         
-        **Option 3: Upload CSV**
+        **📊 Or Upload CSV**
         - Pre-recorded data
         - 40 rows required
         
@@ -205,7 +216,7 @@ def main():
         **Model Accuracy:** 93-97%
         """)
         
-        st.warning("⚠️ Educational purposes only. Not a substitute for professional diagnosis.")
+        st.warning("⚠️ Educational purposes only.")
     
     # Load model
     model, scaler = load_model()
@@ -213,125 +224,53 @@ def main():
     # Initialize session state
     if 'plr_data' not in st.session_state:
         st.session_state.plr_data = {'left': [], 'right': []}
-    if 'recording_mode' not in st.session_state:
-        st.session_state.recording_mode = False
-    if 'snapshots_taken' not in st.session_state:
-        st.session_state.snapshots_taken = 0
     
     # Main interface
     st.markdown("---")
     
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["📸 Direct Recording", "📹 Upload Video", "📝 Upload CSV"])
+    tab1, tab2, tab3 = st.tabs(["🎥 Upload Video (Recommended)", "📸 Take Snapshots", "📝 Upload CSV"])
     
-    # Tab 1: Direct Camera Recording
+    # Tab 1: Video Upload (PRIMARY METHOD)
     with tab1:
-        st.subheader("📸 Direct Camera Recording")
-        st.info("💡 Position yourself 30-40cm from camera. We'll take 40 snapshots over 4 seconds.")
+        st.subheader("🎥 Upload PLR Video")
         
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            # Camera input
-            camera_image = st.camera_input(
-                "Position your face and ensure both eyes are visible",
-                key="camera_input"
-            )
+            st.info("💡 **Best method:** Record a 4-5 second video on your phone showing the pupillary light reflex test")
             
-            if camera_image is not None:
-                # Process snapshot
-                annotated_frame, left_diam, right_diam = process_snapshot(camera_image)
-                
-                # Show annotated image
-                st.image(annotated_frame, caption="Pupil Detection Preview", use_container_width=True)
-                
-                # Display detection status
-                if left_diam and right_diam:
-                    st.success(f"✅ Pupils detected! Left: {left_diam:.2f}mm, Right: {right_diam:.2f}mm")
-                else:
-                    st.warning("⚠️ Could not detect both pupils. Adjust lighting and position.")
+            st.markdown("""
+            ### 📱 How to Record:
+            1. **Open phone camera** (use rear camera for better quality)
+            2. **Position** someone 30-40cm away
+            3. **Start recording** and ensure both eyes are visible
+            4. **Shine a flashlight** at the eyes (from another device/light source)
+            5. **Record for 4-5 seconds** total
+            6. **Stop recording**
+            7. **Upload the video** below
+            """)
+            
+            video_file = st.file_uploader(
+                "Choose a video file",
+                type=['mp4', 'mov', 'avi', 'mkv', 'webm'],
+                help="Upload a 4-5 second video showing PLR test"
+            )
         
         with col2:
-            st.markdown("### 🎬 Recording Control")
-            
-            # Show current progress
-            progress = len(st.session_state.plr_data['left'])
-            st.metric("Frames Captured", f"{progress}/40")
-            
-            if progress < 40:
-                # Recording instructions
-                if progress == 0:
-                    st.info("Click 'Start Recording' when ready. You'll have 4 seconds to shine light at your eyes.")
-                else:
-                    st.warning(f"Recording in progress... {40 - progress} frames remaining")
-                
-                # Start/Continue recording button
-                if st.button("🔴 Start/Continue Recording", type="primary", use_container_width=True):
-                    if camera_image is not None:
-                        annotated_frame, left_diam, right_diam = process_snapshot(camera_image)
-                        
-                        if left_diam and right_diam:
-                            st.session_state.plr_data['left'].append(left_diam)
-                            st.session_state.plr_data['right'].append(right_diam)
-                            st.success(f"✅ Frame {len(st.session_state.plr_data['left'])} captured!")
-                            time.sleep(0.1)  # 100ms delay between frames
-                            st.rerun()
-                        else:
-                            st.error("❌ Pupils not detected. Please adjust position.")
-                    else:
-                        st.error("❌ Please allow camera access first.")
-                
-                # Reset button
-                if progress > 0:
-                    if st.button("🔄 Reset Recording", use_container_width=True):
-                        st.session_state.plr_data = {'left': [], 'right': []}
-                        st.rerun()
-            else:
-                st.success("✅ Recording complete! Scroll down to see results.")
-                if st.button("🔄 Record New Session", use_container_width=True):
-                    st.session_state.plr_data = {'left': [], 'right': []}
-                    st.rerun()
-        
-        # Auto-recording mode
-        st.markdown("---")
-        st.markdown("### ⚡ Quick Auto-Record Mode")
-        st.info("Click below to automatically capture 40 frames. Shine light at your eyes immediately after clicking!")
-        
-        if st.button("⚡ Auto-Record 40 Frames (4 seconds)", use_container_width=True):
-            if camera_image is not None:
-                st.session_state.plr_data = {'left': [], 'right': []}
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                for i in range(40):
-                    # Note: This won't work perfectly in Streamlit due to camera_input limitations
-                    # But shows the concept
-                    status_text.text(f"Recording frame {i+1}/40... Keep still!")
-                    progress_bar.progress((i + 1) / 40)
-                    time.sleep(0.1)
-                
-                progress_bar.empty()
-                status_text.empty()
-                st.warning("⚠️ Auto-record has limitations. Use manual capture for best results.")
-            else:
-                st.error("❌ Please allow camera access first.")
-    
-    # Tab 2: Video Upload
-    with tab2:
-        st.subheader("📹 Upload PLR Video")
-        st.info("💡 Record a 4-5 second video showing pupillary light reflex test")
-        
-        video_file = st.file_uploader(
-            "Choose a video file",
-            type=['mp4', 'mov', 'avi', 'mkv', 'webm'],
-            help="Upload a video showing PLR (4-5 seconds)"
-        )
+            st.markdown("### ✅ Recording Tips:")
+            st.success("✓ Good lighting on face")
+            st.success("✓ Both eyes visible")
+            st.success("✓ Hold camera steady")
+            st.success("✓ 4-5 seconds long")
+            st.success("✓ Shine bright light")
+            st.success("✓ Subject looks at camera")
         
         if video_file is not None:
             # Show video preview
             st.video(video_file)
             
-            if st.button("🔍 Analyze Video", type="primary"):
+            if st.button("🔍 Analyze Video", type="primary", use_container_width=True):
                 with st.spinner("🎬 Processing video frames..."):
                     left_data, right_data = process_video(video_file)
                 
@@ -340,10 +279,70 @@ def main():
                     st.session_state.plr_data['left'] = left_data[:40]
                     st.session_state.plr_data['right'] = right_data[:40]
                     st.success(f"✅ Successfully extracted 40 frames!")
+                    st.balloons()
                     st.rerun()
+                elif len(left_data) > 0:
+                    st.warning(f"⚠️ Only detected {len(left_data)} valid frames. Need at least 40.")
+                    st.info("💡 **Tips to improve detection:**\n- Ensure better lighting on the face\n- Make sure both eyes are clearly visible\n- Record for at least 4-5 seconds\n- Keep the camera steady")
                 else:
-                    st.error(f"❌ Only detected {len(left_data)} valid frames. Need 40 frames.")
-                    st.info("💡 Tips: Ensure good lighting, clear view of both eyes, record for at least 4 seconds.")
+                    st.error("❌ Could not detect any pupils in the video.")
+                    st.info("💡 **Common issues:**\n- Video too dark\n- Eyes not visible\n- Camera too far away\n- Poor video quality")
+    
+    # Tab 2: Snapshot Method
+    with tab2:
+        st.subheader("📸 Take Multiple Snapshots")
+        st.info("💡 Take 40 photos while performing the PLR test. Upload each photo individually.")
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Single image upload
+            image_file = st.file_uploader(
+                "Upload a snapshot",
+                type=['jpg', 'jpeg', 'png'],
+                help="Take a photo and upload it",
+                key="snapshot_uploader"
+            )
+            
+            if image_file is not None:
+                # Process snapshot
+                annotated_frame, left_diam, right_diam = process_snapshot(image_file)
+                
+                # Show annotated image
+                st.image(annotated_frame, caption="Pupil Detection", use_container_width=True)
+                
+                # Display detection status
+                if left_diam and right_diam:
+                    st.success(f"✅ Pupils detected! Left: {left_diam:.2f}mm, Right: {right_diam:.2f}mm")
+                    
+                    # Add to collection button
+                    if st.button("➕ Add This Snapshot to Collection", type="primary"):
+                        st.session_state.plr_data['left'].append(left_diam)
+                        st.session_state.plr_data['right'].append(right_diam)
+                        st.success(f"✅ Snapshot {len(st.session_state.plr_data['left'])} added!")
+                        st.rerun()
+                else:
+                    st.warning("⚠️ Could not detect both pupils. Please adjust lighting and retake photo.")
+        
+        with col2:
+            st.markdown("### 📊 Collection Status")
+            progress = len(st.session_state.plr_data['left'])
+            st.metric("Snapshots Collected", f"{progress}/40")
+            
+            # Progress bar
+            progress_percentage = min(progress / 40, 1.0)
+            st.progress(progress_percentage)
+            
+            if progress < 40:
+                st.info(f"Need {40 - progress} more snapshots")
+            else:
+                st.success("✅ Collection complete! Scroll down for results.")
+            
+            # Reset button
+            if progress > 0:
+                if st.button("🔄 Clear Collection", use_container_width=True):
+                    st.session_state.plr_data = {'left': [], 'right': []}
+                    st.rerun()
     
     # Tab 3: CSV Upload
     with tab3:
@@ -356,13 +355,35 @@ def main():
                 'right_pupil': [5.1, 5.0, 4.7, 4.4, 4.2, 4.1, 4.0, 3.9, 4.0, 4.1]
             })
             st.dataframe(sample_df, use_container_width=True)
-            st.caption("Your CSV should have 40 rows in this format (showing first 10 rows)")
+            st.caption("Your CSV should have 40 rows (showing first 10)")
             
-            # Download sample CSV
+            # Create sample CSV with realistic PLR pattern
+            baseline = 5.0
+            constriction = 3.5
+            frames = 40
+            
+            # Simulate PLR: baseline -> constrict -> recover
+            left_pattern = []
+            right_pattern = []
+            
+            for i in range(frames):
+                if i < 10:  # Baseline
+                    left_pattern.append(baseline + np.random.normal(0, 0.1))
+                    right_pattern.append(baseline + np.random.normal(0, 0.1))
+                elif i < 25:  # Constriction
+                    progress = (i - 10) / 15
+                    left_pattern.append(baseline - (baseline - constriction) * progress + np.random.normal(0, 0.1))
+                    right_pattern.append(baseline - (baseline - constriction) * progress + np.random.normal(0, 0.1))
+                else:  # Recovery
+                    progress = (i - 25) / 15
+                    left_pattern.append(constriction + (baseline - constriction) * progress + np.random.normal(0, 0.1))
+                    right_pattern.append(constriction + (baseline - constriction) * progress + np.random.normal(0, 0.1))
+            
             sample_full = pd.DataFrame({
-                'left_pupil': np.random.uniform(3.5, 5.5, 40),
-                'right_pupil': np.random.uniform(3.5, 5.5, 40)
+                'left_pupil': left_pattern,
+                'right_pupil': right_pattern
             })
+            
             st.download_button(
                 label="📥 Download Sample CSV Template",
                 data=sample_full.to_csv(index=False),
@@ -381,17 +402,21 @@ def main():
                 df = pd.read_csv(uploaded_file)
                 
                 # Show preview
+                st.markdown("**Preview of uploaded data:**")
                 st.dataframe(df.head(10), use_container_width=True)
+                st.caption(f"Showing first 10 of {len(df)} rows")
                 
                 if len(df) != 40:
                     st.error(f"❌ CSV has {len(df)} rows but must have exactly 40 rows!")
                 elif 'left_pupil' not in df.columns or 'right_pupil' not in df.columns:
                     st.error("❌ CSV must have 'left_pupil' and 'right_pupil' columns!")
+                    st.info(f"Found columns: {', '.join(df.columns)}")
                 else:
                     # Store in session state
                     st.session_state.plr_data['left'] = df['left_pupil'].tolist()
                     st.session_state.plr_data['right'] = df['right_pupil'].tolist()
                     st.success("✅ CSV data loaded successfully!")
+                    st.balloons()
             except Exception as e:
                 st.error(f"❌ Error reading CSV: {str(e)}")
     
@@ -401,7 +426,7 @@ def main():
         st.header("📊 Analysis Results")
         
         # Show data visualization
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([3, 2])
         
         with col1:
             st.markdown("#### 📈 PLR Trace")
@@ -410,21 +435,22 @@ def main():
                 y=st.session_state.plr_data['left'],
                 mode='lines+markers',
                 name='Left Pupil',
-                line=dict(color='#3498db', width=2),
+                line=dict(color='#3498db', width=3),
                 marker=dict(size=6)
             ))
             fig.add_trace(go.Scatter(
                 y=st.session_state.plr_data['right'],
                 mode='lines+markers',
                 name='Right Pupil',
-                line=dict(color='#e74c3c', width=2),
+                line=dict(color='#e74c3c', width=3),
                 marker=dict(size=6)
             ))
             fig.update_layout(
-                xaxis_title="Frame Number",
-                yaxis_title="Diameter (mm)",
-                height=350,
-                hovermode='x unified'
+                xaxis_title="Frame Number (0.1s intervals)",
+                yaxis_title="Pupil Diameter (mm)",
+                height=400,
+                hovermode='x unified',
+                legend=dict(x=0.7, y=1)
             )
             st.plotly_chart(fig, use_container_width=True)
         
@@ -443,12 +469,12 @@ def main():
                 confidence = predictions[predicted_class] * 100
                 
                 # Display prediction with styling
-                st.markdown("#### 🎯 Prediction Result")
+                st.markdown("#### 🎯 Diagnosis")
                 st.markdown(
-                    f"<div style='padding: 20px; background-color: {CLASS_COLORS[predicted_class]}22; "
-                    f"border-radius: 10px; border-left: 5px solid {CLASS_COLORS[predicted_class]};'>"
-                    f"<h2 style='margin: 0; color: {CLASS_COLORS[predicted_class]};'>{CLASS_LABELS[predicted_class]}</h2>"
-                    f"<p style='margin: 10px 0 0 0; font-size: 24px;'>Confidence: {confidence:.1f}%</p>"
+                    f"<div style='padding: 25px; background: linear-gradient(135deg, {CLASS_COLORS[predicted_class]}22, {CLASS_COLORS[predicted_class]}11); "
+                    f"border-radius: 15px; border-left: 6px solid {CLASS_COLORS[predicted_class]}; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>"
+                    f"<h2 style='margin: 0; color: {CLASS_COLORS[predicted_class]}; font-size: 32px;'>{CLASS_LABELS[predicted_class]}</h2>"
+                    f"<p style='margin: 15px 0 0 0; font-size: 28px; font-weight: bold;'>Confidence: {confidence:.1f}%</p>"
                     f"</div>",
                     unsafe_allow_html=True
                 )
@@ -463,70 +489,93 @@ def main():
                 'Probability': predictions * 100
             })
             
+            # Sort by probability
+            prob_df = prob_df.sort_values('Probability', ascending=True)
+            
             fig = go.Figure(go.Bar(
                 x=prob_df['Probability'],
                 y=prob_df['Condition'],
                 orientation='h',
                 marker=dict(
-                    color=CLASS_COLORS,
+                    color=[CLASS_COLORS[CLASS_LABELS.index(c)] for c in prob_df['Condition']],
                     line=dict(color='white', width=2)
                 ),
                 text=prob_df['Probability'].round(1).astype(str) + '%',
-                textposition='outside'
+                textposition='outside',
+                textfont=dict(size=14, weight='bold')
             ))
             fig.update_layout(
                 xaxis_title="Probability (%)",
                 height=300,
                 showlegend=False,
                 xaxis=dict(range=[0, 110])
-            )
+            ))
             st.plotly_chart(fig, use_container_width=True)
             
             # Detailed metrics
-            with st.expander("🔍 View Detailed Metrics"):
+            with st.expander("🔍 View Detailed Clinical Metrics"):
                 left_pupil = np.array(st.session_state.plr_data['left'])
                 right_pupil = np.array(st.session_state.plr_data['right'])
                 
+                st.markdown("### Pupil Constriction Analysis")
                 col1, col2, col3, col4 = st.columns(4)
                 
                 constriction_left = (left_pupil[0] - left_pupil.min()) / left_pupil[0] * 100
                 constriction_right = (right_pupil[0] - right_pupil.min()) / right_pupil[0] * 100
-                latency_left = np.argmin(left_pupil)
-                latency_right = np.argmin(right_pupil)
+                latency_left = np.argmin(left_pupil) * 0.1  # Convert to seconds
+                latency_right = np.argmin(right_pupil) * 0.1
                 
-                col1.metric("Left Constriction", f"{constriction_left:.1f}%")
-                col2.metric("Right Constriction", f"{constriction_right:.1f}%")
-                col3.metric("Left Latency", f"{latency_left} frames")
-                col4.metric("Right Latency", f"{latency_right} frames")
+                col1.metric("Left Constriction", f"{constriction_left:.1f}%", 
+                           help="Normal: 25-35%")
+                col2.metric("Right Constriction", f"{constriction_right:.1f}%",
+                           help="Normal: 25-35%")
+                col3.metric("Left Latency", f"{latency_left:.2f}s",
+                           help="Normal: 0.2-0.3s")
+                col4.metric("Right Latency", f"{latency_right:.2f}s",
+                           help="Normal: 0.2-0.3s")
                 
+                st.markdown("### Baseline Measurements")
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Left Mean", f"{left_pupil.mean():.2f} mm")
-                col2.metric("Right Mean", f"{right_pupil.mean():.2f} mm")
-                col3.metric("Left Std Dev", f"{left_pupil.std():.2f} mm")
-                col4.metric("Right Std Dev", f"{right_pupil.std():.2f} mm")
+                
+                col1.metric("Left Mean", f"{left_pupil.mean():.2f} mm",
+                           help="Normal: 2-8mm")
+                col2.metric("Right Mean", f"{right_pupil.mean():.2f} mm",
+                           help="Normal: 2-8mm")
+                col3.metric("Left Variability", f"{left_pupil.std():.3f} mm")
+                col4.metric("Right Variability", f"{right_pupil.std():.3f} mm")
+                
+                # Asymmetry check
+                asymmetry = abs(constriction_left - constriction_right)
+                st.markdown("### Symmetry Analysis")
+                if asymmetry > 20:
+                    st.warning(f"⚠️ Significant asymmetry detected: {asymmetry:.1f}% difference")
+                else:
+                    st.success(f"✅ Symmetric response: {asymmetry:.1f}% difference")
             
             # Download results
             st.markdown("---")
-            col1, col2 = st.columns([3, 1])
+            col1, col2, col3 = st.columns([2, 1, 1])
             
             with col2:
                 # Export data
                 export_df = pd.DataFrame({
-                    'left_pupil': st.session_state.plr_data['left'],
-                    'right_pupil': st.session_state.plr_data['right']
+                    'frame': range(1, 41),
+                    'time_seconds': [i * 0.1 for i in range(40)],
+                    'left_pupil_mm': st.session_state.plr_data['left'],
+                    'right_pupil_mm': st.session_state.plr_data['right']
                 })
                 
                 st.download_button(
-                    label="📥 Download Results CSV",
+                    label="📥 Download Data CSV",
                     data=export_df.to_csv(index=False),
-                    file_name="plr_analysis_results.csv",
+                    file_name="plr_analysis_data.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
             
-            with col1:
+            with col3:
                 # Clear data button
-                if st.button("🔄 Analyze New Recording", use_container_width=True):
+                if st.button("🔄 New Analysis", use_container_width=True):
                     st.session_state.plr_data = {'left': [], 'right': []}
                     st.rerun()
 
