@@ -231,11 +231,23 @@ def process_snapshot(image_file):
 # Enhanced video processing with quality control
 def process_video_enhanced(video_file, progress_placeholder, status_placeholder):
     """Enhanced video processing with quality metrics and outlier detection."""
+    # Create temporary file
     tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-    tfile.write(video_file.read())
+    
+    # Reset file pointer and read content
+    video_file.seek(0)
+    video_bytes = video_file.read()
+    tfile.write(video_bytes)
+    tfile.flush()
     tfile.close()
     
+    # Open video file
     cap = cv2.VideoCapture(tfile.name)
+    
+    if not cap.isOpened():
+        status_placeholder.error("❌ Failed to open video file")
+        os.unlink(tfile.name)
+        return [], [], 0
     
     left_measurements = []
     right_measurements = []
@@ -267,7 +279,7 @@ def process_video_enhanced(video_file, progress_placeholder, status_placeholder)
             if frames_processed % 5 == 0:  # Update every 5 frames
                 progress_text = f"🔍 Analyzing frame {frame_count}/{total_frames} | Valid: {frames_processed} | Quality: {quality:.1f}%"
                 status_placeholder.text(progress_text)
-                progress_placeholder.progress(min(frame_count / total_frames, 1.0))
+                progress_placeholder.progress(min(frame_count / max(total_frames, 1), 1.0))
         
         frame_count += 1
     
@@ -369,8 +381,8 @@ def calculate_plr_parameters(left_data, right_data):
 def predict_plr_enhanced(left_data, right_data, model, scaler):
     """Enhanced prediction with uncertainty quantification."""
     try:
-        left_pupil = np.array(left_data)
-        right_pupil = np.array(right_data)
+        left_pupil = np.array(left_data, dtype=np.float32)
+        right_pupil = np.array(right_data, dtype=np.float32)
         
         # Ensure exactly 40 frames
         if len(left_pupil) < 40:
@@ -381,8 +393,23 @@ def predict_plr_enhanced(left_data, right_data, model, scaler):
             left_pupil = left_pupil[:40]
             right_pupil = right_pupil[:40]
         
+        # Stack into sequence (40, 2)
         sequence = np.column_stack([left_pupil, right_pupil])
-        sequence = sequence.reshape(1, 40, 2)
+        
+        # Normalize if scaler is provided
+        if scaler is not None:
+            try:
+                sequence = scaler.transform(sequence)
+            except:
+                pass  # If scaler fails, use raw data
+        
+        # Reshape to (1, 40, 2) - add batch dimension
+        sequence = np.expand_dims(sequence, axis=0)
+        
+        # Verify shape
+        if sequence.shape != (1, 40, 2):
+            st.error(f"Shape mismatch: {sequence.shape}, expected (1, 40, 2)")
+            return None, None
         
         # Multiple predictions for uncertainty estimation
         predictions_list = []
@@ -396,6 +423,8 @@ def predict_plr_enhanced(left_data, right_data, model, scaler):
         return predictions, prediction_std
     except Exception as e:
         st.error(f"⚠️ Prediction error: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None, None
 
 def get_clinical_interpretation(condition, confidence, params):
