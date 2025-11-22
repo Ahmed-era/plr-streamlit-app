@@ -560,11 +560,15 @@ def main():
         video_file = st.file_uploader(
             "📁 Upload PLR Video Recording",
             type=['mp4', 'mov', 'avi', 'mkv', 'webm'],
-            help="Upload standardized PLR video examination"
+            help="Upload standardized PLR video examination",
+            key="video_uploader"
         )
         
         if video_file is not None:
             st.markdown("#### 🎥 Video Preview")
+            
+            # Reset video file pointer to beginning
+            video_file.seek(0)
             st.video(video_file)
             
             st.markdown("---")
@@ -572,6 +576,9 @@ def main():
             if st.button("🚀 Begin Automated Analysis", type="primary", use_container_width=True):
                 progress_placeholder = st.empty()
                 status_placeholder = st.empty()
+                
+                # Reset file pointer before processing
+                video_file.seek(0)
                 
                 with st.spinner("🔬 Analyzing video data..."):
                     left_data, right_data, quality = process_video_enhanced(
